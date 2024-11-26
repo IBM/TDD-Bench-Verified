@@ -1,0 +1,6 @@
+TDD_Bench.json
+logs
+tddbench.egg-info
+*__pycache__/
+.DS_Store
+tddbench.egg-info
