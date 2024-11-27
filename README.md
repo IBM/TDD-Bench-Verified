@@ -19,7 +19,7 @@ cd TDD-Bench-Verified
 pip install -e .
 ```
 
-Generate TDD_Bench.json by running. This json file will contain complete dataset (which includes repository name, issue description, base commit SHA and other relevant information for 449 instances).
+Generate TDD_Bench.json by running the following command. This json file will contain the complete dataset (which includes repository name, issue description, base commit SHA and other relevant information for 449 instances).
 ```bash
 python dataset_preparation.py
 ```
@@ -48,7 +48,7 @@ python -m tddbench.harness.run_evaluation \
 ```
 
 
-use golden_test_patch.json formatting as a reference for "--predictions_path". The format is shown below. 
+Use golden_test_patch.json formatting as a reference for "--predictions_path". The format is also shown below. 
 
 ```bash
 [
