@@ -6,7 +6,7 @@ TDD-Bench-Verified is derived from SWE-bench Verified. Each instance $x = (d_{is
 
 **Leaderboard Link: TBA** 
 
-<img src="Figures/tdd-github.pdf">
+<img src="Figures/tdd-github.png">
 
 
 
