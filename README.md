@@ -6,6 +6,8 @@ TDD-Bench-Verified is derived from SWE-bench Verified. Each instance $x = (d_{is
 
 **Leaderboard Link: TBA** 
 
+<img src="Figures/tdd-github.pdf">
+
 
 
 ## 🚀 Set Up
@@ -35,7 +37,7 @@ python -m tddbench.harness.run_evaluation \
 ```
 
 
-Evaluate model predictions on TDD-bench using the evaluation harness with the following command. This command will take the model generated test patches (--predictions_path) as input and report the $TDD_Score$ and number of fail-to-pass instances.
+Evaluate model predictions on TDD-bench using the evaluation harness with the following command. This command will take the model generated test patches (--predictions_path) as input and report the $TDD_{Score}$ and number of fail-to-pass instances.
 ```bash
 python -m tddbench.harness.run_evaluation \
     --dataset_name TDD_Bench.json \  
