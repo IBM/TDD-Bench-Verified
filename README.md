@@ -79,5 +79,17 @@ tqdm
 pytest
 cldk
 ```
+## Reference
+If you use this benchmark, please consider citing us.
+```
+@article{ahmed2024tdd,
+  title={TDD-Bench Verified: Can LLMs Generate Tests for Issues Before They Get Resolved?}, 
+  author={Ahmed, Toufique and Hirzel, Martin and Pan, Rangeet and Shinnar, Avraham and Sinha, Saurabh},
+  journal={arXiv preprint arXiv:2412.02883},
+  year={2024} 
+}
+```
+This research was conducted by Toufique Ahmed, Martin Hirzel, Rangeet Pan, Avraham Shinnar, and Saurabh Sinha.  
+
 
 
