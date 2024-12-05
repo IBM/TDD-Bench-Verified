@@ -2,7 +2,7 @@ TDD-Bench-Verified is a new benchmark for generating test cases for test-driven 
 
 TDD-Bench-Verified is derived from SWE-bench Verified. Each instance $x = (d_{issue}, c_{old})$ comprises a natural-language issue description $d_{issue}$ together with the original version of a codebase $c_{old}$ right before the issue was addressed. A prediction $y$ for an instance consists of a set of tests that should fail on $c_{old}$ and pass on $c_{new}$. However, solutions to TDD-Bench-Verified should predict $y$ without looking at $c_{new}$. This is a challenging task for large language models (LLMs). TDD-Bench-Verified contains 449 instance $x_i$, along with a Docker-based evaluation harness that evaluates a submission of predictions $y_i$. It checks the fail-to-pass criterion for each $y_i$, as well as measuring its code coverage on the code change from $c_{old}$ to $c_{new}$.
 
-**Paper Link: TBA** 
+**Paper Link: [https://arxiv.org/pdf/2412.02883](https://arxiv.org/pdf/2412.02883)** 
 
 **Leaderboard Link: TBA** 
 
