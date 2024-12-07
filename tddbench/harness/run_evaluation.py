@@ -1014,6 +1014,7 @@ def make_run_report(
         "error_ids": list(sorted(error_ids)),
         "unstopped_containers": list(sorted(unstopped_containers)),
         "unremoved_images": list(sorted(unremoved_images)),
+        "final_score": score/len(full_dataset),
         "schema_version": 2,
     }
     report_file = Path(
