@@ -4,8 +4,6 @@ TDD-Bench-Verified is derived from SWE-bench Verified. Each instance $x = (d_{is
 
 **Paper Link: [https://arxiv.org/pdf/2412.02883](https://arxiv.org/pdf/2412.02883)** 
 
-**Leaderboard Link: TBA** 
-
 <img src="Figures/tdd-github.png">
 
 

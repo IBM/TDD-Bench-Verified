@@ -233,7 +233,7 @@ def modify_eval(text,instance_id,fun2test):
                 if fname.find(".py")!=-1 or fname.find(".")!=-1: # . is for django
                     fcount=fcount+1 
                 else:
-                        break       
+                    break       
             remain=ln.split(" ")[0:len(segments)-fcount]
             command=""
 
