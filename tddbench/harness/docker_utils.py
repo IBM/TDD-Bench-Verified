@@ -173,7 +173,7 @@ def cleanup_container(client, container, logger):
         )
 
 
-def exec_run_with_timeout(container, cmd, timeout: int|None=60):
+def exec_run_with_timeout(container, cmd, timeout: int|None=1500):
     """
     Run a command in a container with a timeout.
 

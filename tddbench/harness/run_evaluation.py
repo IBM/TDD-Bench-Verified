@@ -885,7 +885,7 @@ def get_dataset_from_preds(
         report_file = (
             RUN_EVALUATION_LOG_DIR
             / run_id
-            / prediction["model_name_or_path"].replace("/", "__")
+            / "gold"
             / prediction[KEY_INSTANCE_ID]
             / "report.json"
         )
@@ -949,7 +949,7 @@ def make_run_report(
         report_file = (
             RUN_EVALUATION_LOG_DIR
             / run_id
-            / prediction["model_name_or_path"].replace("/", "__")
+            / "gold"
             / prediction[KEY_INSTANCE_ID]
             / "report.json"
         )
