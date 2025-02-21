@@ -516,7 +516,7 @@ def run_instance(
             logger.info(f"Git diff changed after running eval script")
 
         test_result_before,_=get_logs_eval(test_output_path)
-        print('-------------------------------Before Golden Patch-------------------------------')
+        print('-------------------------------Before Patch-------------------------------')
         print(test_result_before)
         print('---------------------------------------------------------------------------------\n\n\n')
 
@@ -690,7 +690,7 @@ def run_instance(
 
 
 
-        print('-------------------------------After Golden Patch-------------------------------')
+        print('-------------------------------After Patch-------------------------------')
         print(test_result)
         print('--------------------------------------------------------------------------------\n\n\n')
 
@@ -845,6 +845,7 @@ def get_dataset_from_preds(
         split: str,
         instance_ids: list,
         predictions: dict,
+        patch_model_name: str,
         run_id: str,
         exclude_completed: bool = True
     ):
@@ -885,7 +886,7 @@ def get_dataset_from_preds(
         report_file = (
             RUN_EVALUATION_LOG_DIR
             / run_id
-            / "gold"
+            / patch_model_name
             / prediction[KEY_INSTANCE_ID]
             / "report.json"
         )
@@ -905,6 +906,7 @@ def get_dataset_from_preds(
 
 
 def make_run_report(
+        patch_model_name,
         predictions: dict,
         full_dataset: list,
         client: docker.DockerClient,
@@ -949,7 +951,7 @@ def make_run_report(
         report_file = (
             RUN_EVALUATION_LOG_DIR
             / run_id
-            / "gold"
+            / patch_model_name
             / prediction[KEY_INSTANCE_ID]
             / "report.json"
         )
@@ -1060,6 +1062,7 @@ def main(
         dataset_name: str,
         split: str,
         instance_ids: list,
+        patch_path: str,
         predictions_path: str,
         max_workers: int,
         force_rebuild: bool,
@@ -1090,21 +1093,49 @@ def main(
                 predictions = [json.loads(line) for line in f]
         else:
             raise ValueError("Predictions path must be \"gold\", .json, or .jsonl")
-        
+
         for pred in predictions:
             pred["model_name_or_path"]=predictions_path
-        
 
 
+    if patch_path == 'gold':
+        print("Using gold patch predictions")
+        patch_model_name = 'gold'
+        patches = get_golden_patch(dataset_name, split)
+    else:
+        patch_p: Path = Path(patch_path)
+        if patch_p.is_dir():
+            patch_model_name = patch_p.parts[-1]
+            outsw = Path(patch_p, 'output.swebench.jsonl')
+            if outsw.is_file():
+                print(f"Using patch prediction: {outsw}")
+                patch_p = outsw
+            else:
+                raise ValueError(f'Given patch path given a directory ({patch_p}) without an output.swebench.jsonl file')
+        else:
+            # given a file, we will still use the folder name
+            patch_model_name = patch_p.parts[-2]
 
-    golden_patches = get_golden_patch(dataset_name, split)  
+        if patch_p.suffix == ".json":
+            with open(patch_p, "r") as f:
+                patches = json.load(f)
+        elif patch_p.suffix == ".jsonl":
+            with open(patch_p, "r") as f:
+                patches = [json.loads(line) for line in f]
+        else:
+            raise ValueError("Patch predictions path must be \"gold\", .json, or .jsonl")
+
+        for pred in patches:
+            pred["model_name_or_path"]=patch_model_name
+
+
     predictions = {pred[KEY_INSTANCE_ID]: pred for pred in predictions}
-    golden_patches = {gold[KEY_INSTANCE_ID]: gold for gold in golden_patches}
+    patches = {patch[KEY_INSTANCE_ID]: patch for patch in patches}
 
 
 
     # get dataset from predictions
-    dataset = get_dataset_from_preds(dataset_name, split, instance_ids, predictions, run_id)
+    dataset = get_dataset_from_preds(dataset_name, split, instance_ids, predictions, patch_model_name, run_id)
 
     full_dataset = load_tddbench_dataset(dataset_name, split, instance_ids)
 
@@ -1118,11 +1149,11 @@ def main(
     else:
         # build environment images + run instances
         build_env_images(client, dataset, force_rebuild, max_workers)
-        run_instances(golden_patches, dataset, cache_level, clean, force_rebuild, max_workers, run_id, timeout)
+        run_instances(patches, dataset, cache_level, clean, force_rebuild, max_workers, run_id, timeout)
 
     # clean images + make final report
     clean_images(client, existing_images, cache_level, clean)
-    make_run_report(predictions, full_dataset, client, run_id)
+    make_run_report(patch_model_name, predictions, full_dataset, client, run_id)
 
 
 if __name__ == "__main__":
@@ -1130,6 +1161,7 @@ if __name__ == "__main__":
     parser.add_argument("--dataset_name", default="TDD_Bench.json", type=str, help="Name of dataset or path to JSON file.")
     parser.add_argument("--split", type=str, default="test", help="Split of the dataset")
     parser.add_argument("--instance_ids", nargs="+", type=str, help="Instance IDs to run (space separated)")
+    parser.add_argument("--patch_path", default="gold", type=str, help="Path to patches predictions file - if 'gold', uses gold patch")
     parser.add_argument("--predictions_path", type=str, help="Path to predictions file - if 'gold', uses gold predictions", required=True)
     parser.add_argument("--max_workers", type=int, default=4, help="Maximum number of workers (should be <= 75%% of CPU cores)")
     parser.add_argument("--open_file_limit", type=int, default=4096, help="Open file limit")
