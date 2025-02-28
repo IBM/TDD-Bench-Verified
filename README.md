@@ -86,8 +86,10 @@ If you use this benchmark, please consider citing our works.
   journal={arXiv preprint arXiv:2412.02883},
   year={2024} 
 }
+```
+**Paper Link: [https://arxiv.org/pdf/2412.02883](https://arxiv.org/pdf/2412.02883)** 
 
-
+```
 @article{ahmed2025otter,
   title={Otter: Generating Tests from Issues to Validate SWE Patches},
   author={Ahmed, Toufique and Ganhotra, Jatin and Pan, Rangeet and Shinnar, Avraham and Sinha, Saurabh and Hirzel, Martin},
@@ -95,6 +97,8 @@ If you use this benchmark, please consider citing our works.
   year={2025}
 }
 ```
+**Paper Link: [https://arxiv.org/pdf/2502.05368](https://arxiv.org/pdf/2502.05368)**
+
 This research was conducted by Toufique Ahmed, Jatin Ganhotra, Rangeet Pan, Avraham Shinnar, Saurabh Sinha, and Martin Hirzel.  
 
 
