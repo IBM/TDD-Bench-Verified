@@ -78,7 +78,7 @@ pytest
 cldk
 ```
 ## Reference
-If you use this benchmark, please consider citing us.
+If you use this benchmark, please consider citing our works.
 ```
 @article{ahmed2024tdd,
   title={TDD-Bench Verified: Can LLMs Generate Tests for Issues Before They Get Resolved?}, 
@@ -86,8 +86,16 @@ If you use this benchmark, please consider citing us.
   journal={arXiv preprint arXiv:2412.02883},
   year={2024} 
 }
+
+
+@article{ahmed2025otter,
+  title={Otter: Generating Tests from Issues to Validate SWE Patches},
+  author={Ahmed, Toufique and Ganhotra, Jatin and Pan, Rangeet and Shinnar, Avraham and Sinha, Saurabh and Hirzel, Martin},
+  journal={arXiv preprint arXiv:2502.05368},
+  year={2025}
+}
 ```
-This research was conducted by Toufique Ahmed, Martin Hirzel, Rangeet Pan, Avraham Shinnar, and Saurabh Sinha.  
+This research was conducted by Toufique Ahmed, Jatin Ganhotra, Rangeet Pan, Avraham Shinnar, Saurabh Sinha, and Martin Hirzel.  
 
 
 
