@@ -28,7 +28,10 @@ RUN wget 'https://repo.anaconda.com/miniconda/Miniconda3-py311_23.11.0-2-Linux-{
 ENV PATH=/opt/miniconda3/bin:$PATH
 # Add conda to shell startup scripts like .bashrc (DO NOT REMOVE THIS)
 RUN conda init --all
-RUN conda config --append channels conda-forge
+
+#RUN conda config --append channels conda-forge
+RUN conda config --add channels conda-forge
+RUN conda config --set channel_priority strict
 
 RUN adduser --disabled-password --gecos 'dog' nonroot
 """
