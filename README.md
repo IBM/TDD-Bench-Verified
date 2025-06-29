@@ -97,7 +97,9 @@ If you use this benchmark, please consider citing our works.
   year={2025}
 }
 ```
-**Paper Link: [https://arxiv.org/pdf/2502.05368](https://arxiv.org/pdf/2502.05368)**
+**Paper Link: [https://arxiv.org/pdf/2502.05368](https://arxiv.org/pdf/2502.05368)**  
+
+**Poster Link: [https://github.com/IBM/TDD-Bench-Verified/blob/main/Figures/ICML_Poster.pdf](https://github.com/IBM/TDD-Bench-Verified/blob/main/Figures/ICML_Poster.pdf)**
 
 <img src="Figures/otter.png">
 
