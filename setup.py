@@ -17,7 +17,7 @@ setuptools.setup(
         'unidiff',
         'tqdm',
         'pytest',
-        'cldk @ git+https://github.com/IBM/codellm-devkit.git@4f513bddd0a1c5475fe6fc7a91496e582c905214'
+        'cldk'
     ],
     include_package_data=True,
 )

@@ -11,10 +11,10 @@ from pathlib import Path
 from tqdm import tqdm
 import re
 import ast
-from cldk.analysis.python.treesitter import PythonSitter
+from cldk.analysis.commons.treesitter import TreesitterPython
 
 
-cldk_python = PythonSitter()
+cldk_python = TreesitterPython()
 
 DIFF_MODIFIED_FILE_REGEX = r"--- a/(.*)"
 
@@ -372,7 +372,7 @@ def run_instance(
         text=text.split("python3 -m pip install coverage")[0].strip()+"\n"
 
         with open(eval_file,"w") as f:
-            text=f.write(text)
+            f.write(text)
         copy_to_container(container, eval_file, Path("/eval.sh"))
         test_output, timed_out, total_runtime = exec_run_with_timeout(container, "/bin/bash /eval.sh", timeout)   
 
@@ -440,7 +440,7 @@ def run_instance(
         text=modify_eval(text,instance_id,fun2test)
                
         with open(eval_file,"w") as f:
-            text=f.write(text)
+            f.write(text)
 
         logger.info(
             f"Eval script for {instance_id} written to {eval_file}; copying to container..."
@@ -605,7 +605,7 @@ def run_instance(
                
                
         with open(eval_file,"w") as f:
-            text=f.write(text)
+            f.write(text)
 
 
         logger.info(
