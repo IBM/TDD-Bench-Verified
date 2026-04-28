@@ -1,8 +1,6 @@
 To build TDD-bench from source, follow these steps:
 ```bash
-git clone https://github.ibm.com/tfahmed/TDD_Java.git
-cd TDD_Java
-pip install -e .
+bash setup.sh
 ```
 
 
@@ -29,4 +27,4 @@ Sample example from prediction file
     }]
 ```
 
-Note that it will work without "class_name", "file_name", and "function_name". 
+Note that it will work with empty "class_name", "file_name", and "function_name".  
