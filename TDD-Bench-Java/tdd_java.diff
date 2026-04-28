@@ -1,0 +1,1153 @@
+diff --git a/.gitignore b/.gitignore
+index d9c2eda..d88e3c9 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,26 +1,8 @@
+-*~
+-*#
+-*.swp
+-
+ *.DS_Store
+-
+-__pycache__/
+-*.py[cod]
+-*$py.class
+-*.egg-info/
+-
+-/.coverage
+-/.coverage.*
+-/.cache
+-/.pytest_cache
+-/.mypy_cache
+-
+-/build
+-run_logs/
+-/build_logs/
+-*.ipynb
+-*.log
+-eval_logs/
+-run_logs*/
+-paper_results/*
+-doc/
++*eval_logs*
++*run_*_java
++*__pycache__/
++*build_logs
++*.json
++poly_bench_evaluation.egg-info
++repos
+diff --git a/src/poly_bench_evaluation/__init__.py b/src/poly_bench_evaluation/__init__.py
+index 3beed86..fdcec83 100644
+--- a/src/poly_bench_evaluation/__init__.py
++++ b/src/poly_bench_evaluation/__init__.py
+@@ -7,7 +7,6 @@ from .parsers.typescript_parsers import (
+ )
+ from .polybench_data import AggregateOutput, PolyBenchInstance, PolyBenchOutput
+ from .repo_utils import RepoManager
+-from .scoring import aggregate_logs, instance_level_scoring, store_instance_level_output
+ 
+ __all__ = [
+     "DockerManager",
+diff --git a/src/poly_bench_evaluation/constants.py b/src/poly_bench_evaluation/constants.py
+index f2c2f31..7207e82 100644
+--- a/src/poly_bench_evaluation/constants.py
++++ b/src/poly_bench_evaluation/constants.py
+@@ -1,7 +1,7 @@
+ # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ # SPDX-License-Identifier: CC-BY-NC-4.0
+-JAVA_TIMEOUT = 1800
+-DEFAULT_TIMEOUT = 1200
++JAVA_TIMEOUT = 3600
++DEFAULT_TIMEOUT = 3600
+ 
+ REPO_TO_PARSER_CLASS = {
+     "google/guava": "JavaGenericParser",
+@@ -25,6 +25,14 @@ REPO_TO_PARSER_CLASS = {
+     "yt-dlp/yt-dlp": "PythonPyUnit",
+     "tensorflow/models": "PythonPyUnit",
+     "keras-team/keras": "PythonPyUnit",
++    "alibaba/fastjson2": "JavaGenericParser",
++    "elastic/logstash": "JavaGenericParser",
++    "mockito/mockito": "JavaGenericParser",
++    "googlecontainertools/jib": "JavaGenericParser", 
++    "fasterxml/jackson-core": "JavaGenericParser",
++    "fasterxml/jackson-databind": "JavaGenericParser",
++    "apache/dubbo": "JavaGenericParser",
++    "fasterxml/jackson-dataformat-xml": "JavaGenericParser"
+ }
+ 
+ _DOCKERFILE_JS_BASE = r"""
+@@ -33,7 +41,7 @@ FROM ubuntu:22.04
+ ARG DEBIAN_FRONTEND=noninteractive
+ ENV TZ=Etc/UTC
+ 
+-RUN apt update && apt install -y \
++RUN apt update && apt install  -y \
+ bzip2 \
+ libgtk-3-0 \
+ libasound2 \
+@@ -121,12 +129,12 @@ java-17-amazon-corretto-devel \
+ java-17-amazon-corretto-jmods
+ 
+ RUN cd /usr/local \
+-   && wget https://dlcdn.apache.org/maven/maven-3/3.9.11/binaries/apache-maven-3.9.11-bin.tar.gz \
+-   && tar zxvf apache-maven-3.9.11-bin.tar.gz \
+-   && rm apache-maven-3.9.11-bin.tar.gz
++   && wget https://dlcdn.apache.org/maven/maven-3/3.9.15/binaries/apache-maven-3.9.15-bin.tar.gz \
++   && tar zxvf apache-maven-3.9.15-bin.tar.gz \
++   && rm apache-maven-3.9.15-bin.tar.gz
+ 
+-ENV MAVEN_HOME="/usr/local/apache-maven-3.9.11"
+-ENV M2_HOME="/usr/local/apache-maven-3.9.11"
++ENV MAVEN_HOME="/usr/local/apache-maven-3.9.15"
++ENV M2_HOME="/usr/local/apache-maven-3.9.15"
+ ENV PATH="$M2_HOME/bin:$PATH"
+ """
+ 
+diff --git a/src/poly_bench_evaluation/docker_utils.py b/src/poly_bench_evaluation/docker_utils.py
+index bafc35a..0eeda85 100644
+--- a/src/poly_bench_evaluation/docker_utils.py
++++ b/src/poly_bench_evaluation/docker_utils.py
+@@ -37,7 +37,7 @@ class DockerManager:
+         except Exception as e:
+             return False
+ 
+-    def try_pull_prebuilt_image(self, instance_id: str, version: str = "latest") -> bool:
++    def try_pull_prebuilt_image(self, instance_id: str, image_name: str = "", version: str = "latest") -> bool:
+         """Try to pull a pre-built image from GHCR
+         
+         Args:
+@@ -47,7 +47,12 @@ class DockerManager:
+         Returns:
+             bool: True if image was successfully pulled, False otherwise
+         """
+-        ghcr_image_name = f"ghcr.io/timesler/swe-polybench.eval.x86_64.{instance_id.lower()}:{version}"
++
++        if image_name == "No-image":
++            ghcr_image_name = f"ghcr.io/timesler/swe-polybench.eval.x86_64.{instance_id}:{version}"
++        else:
++            ghcr_image_name = image_name
++
+         
+         try:
+             logger.info(f"Attempting to pull pre-built image: {ghcr_image_name}")
+@@ -220,6 +225,61 @@ class DockerManager:
+ 
+         return success
+ 
++
++    def apply_withdraw_from_container(
++        self, patch_content: str, patch_type: Literal["code", "test"]
++    ) -> int:
++        """Apply patch inside the running container
++        Args:
++            patch_content: Content of the patch file
++            patch_type: The type of patch, "code" or "test"
++
++        Returns:
++            int: 0 if patch was applied successfully, 1 otherwise
++        """
++        success = 1
++        workdir = str(self._get_workdir_from_image())
++        assert self.container is not None, "Container not created"
++
++        # The filename as it should appear inside the container
++        container_patch_filename = f"patch_{patch_type}.diff"
++
++        if not self.copy_file_to_container(patch_content, container_patch_filename, workdir):
++            raise ValueError("Failed to create patch file in container")
++
++        try:
++            # First try: git apply
++            exec_result = self.container.exec_run(
++                cmd=f"git apply -R -v --ignore-whitespace --reject {workdir}/{container_patch_filename}",
++                workdir=workdir,
++                user="root",
++            )
++            if exec_result.exit_code != 0:
++                # Second try: patch command
++                exec_result = self.container.exec_run(
++                    cmd=f"patch --batch --fuzz=5 -p1 -f -i {workdir}/{container_patch_filename}",
++                    workdir=workdir,
++                    user="root",
++                )
++                if exec_result.exit_code != 0:
++                    raise ValueError("Failed to apply patch.")
++                else:
++                    success = 0
++            else:
++                success = 0
++
++        finally:
++            # Clean up if patch failed
++            if success != 0:
++                self._cleanup()
++                self.container = None
++
++        return success
++
++
++
++
++
+     def docker_run(self, test_command: str, timeout: int) -> int:
+         """Run the CMD command from dockerfile inside the running container.
+         Args:
+@@ -308,8 +368,8 @@ EOF"""
+         if timed_out:
+             logger.info("docker run timed out.")
+ 
+-        self._cleanup()
+-        self.container = None
++        #self._cleanup()
++        #self.container = None
+ 
+         return success
+ 
+@@ -368,6 +428,39 @@ EOF"""
+             image = self.client.images.get(self.image_id)
+         workdir = str(image.attrs["Config"]["WorkingDir"])
+ 
++        if workdir=='/testbed':
++            return workdir
++
++        if self.image_id.find("alibaba__fastjson2")!=-1:
++            return workdir+"/fastjson2"
++        
++        if self.image_id.find("apache__dubbo")!=-1:
++            return workdir+"/dubbo"
++        
++        if self.image_id.find("elastic__logstash")!=-1:
++            return workdir+"/logstash"
++        
++        if self.image_id.find("fasterxml__jackson-core")!=-1:
++            return workdir+"/jackson-core"        
++       
++        if self.image_id.find("fasterxml__jackson-core")!=-1:
++            return workdir+"/jackson-core" 
++        
++        if self.image_id.find("fasterxml__jackson-databind")!=-1:
++            return workdir+"/jackson-databind" 
++        
++        if self.image_id.find("fasterxml__jackson-dataformat-xml")!=-1:
++            return workdir+"/jackson-dataformat-xml"
++
++        if self.image_id.find("google__gson")!=-1:
++            return workdir+"/gson"
++        
++        if self.image_id.find("googlecontainertools__jib")!=-1:
++            return workdir+"/jib"   
++           
++        if self.image_id.find("mockito__mockito")!=-1:
++            return workdir+"/mockito"          
++        
+         return workdir
+ 
+     def _cleanup(self):
+@@ -400,4 +493,38 @@ EOF"""
+ 
+     def __del__(self):
+         """Stop and remove the container, and delete the image if provided."""
++        # Stop and remove the container, and delete the image if provided
+         self._cleanup()
++
++
++
++    def revert_patch_in_container(self, commit_hash: str) -> int:
++        """revert the patches
++        Returns:
++            int: 0 if patch was reverted successfully, 1 otherwise
++        """
++        success = 1
++        workdir = str(self._get_workdir_from_image())
++        assert self.container is not None, "Container not created"
++
++        try:
++            exec_result_1 = self.container.exec_run(
++                cmd=f"git reset --hard {commit_hash}",
++                workdir=workdir,
++                user="root",
++            )
++            exec_result_2 = self.container.exec_run(
++                cmd=f"git clean -fd",
++                workdir=workdir,
++                user="root",
++            )
++            if exec_result_1.exit_code == 0 and exec_result_2.exit_code==0:
++                success = 0
++
++        finally:
++            # Clean up if patch failed
++            if success != 0:
++                self._cleanup()
++                self.container = None
++
++        return success
+diff --git a/src/poly_bench_evaluation/polybench_data.py b/src/poly_bench_evaluation/polybench_data.py
+index 089add8..e29c7f2 100644
+--- a/src/poly_bench_evaluation/polybench_data.py
++++ b/src/poly_bench_evaluation/polybench_data.py
+@@ -26,6 +26,11 @@ class PolyBenchInstance(BaseModel):
+     p2p: List[str]
+     test_command: str
+     modified_nodes: List[str]
++    classname: str
++    testname: str
++    testfile:str
++    issue:str
++    image_name: str 
+ 
+ 
+ @dataclass
+@@ -86,9 +91,14 @@ def dataset_generator(data: pd.DataFrame):
+                 "base_commit": row.base_commit,
+                 "language": row.language,
+                 "dockerfile": row.Dockerfile,
+-                "f2p": ast.literal_eval(row.F2P),
+-                "p2p": ast.literal_eval(row.P2P),
++                "f2p": [],
++                "p2p": [],
+                 "test_command": row.test_command,
+-                "modified_nodes": json.loads(row.modified_nodes),
++                "modified_nodes": [],
++                "classname": row.class_name,
++                "testname": row.function_name,
++                "testfile": row.file_name,
++                "issue":row.problem_statement,
++                "image_name":row.image_name
+             }
+         )
+diff --git a/src/poly_bench_evaluation/run_evaluation.py b/src/poly_bench_evaluation/run_evaluation.py
+index 5242c43..51f2aa8 100644
+--- a/src/poly_bench_evaluation/run_evaluation.py
++++ b/src/poly_bench_evaluation/run_evaluation.py
+@@ -11,16 +11,15 @@ import sys
+ import docker
+ import pandas as pd
+ from loguru import logger
++import os
++
+ 
+ logger.remove()
+ logger.add(sink=sys.stderr, level="DEBUG")
+ 
+ from poly_bench_evaluation.constants import DEFAULT_TIMEOUT, JAVA_TIMEOUT, REPO_TO_PARSER_CLASS
+ from poly_bench_evaluation.docker_utils import DockerManager
+-from poly_bench_evaluation.metrics.metric_scoring import (
+-    _get_zero_result,
+-    instance_level_metric_scoring,
+-)
++
+ from poly_bench_evaluation.polybench_data import (
+     PolyBenchInstance,
+     PolyBenchOutput,
+@@ -28,12 +27,72 @@ from poly_bench_evaluation.polybench_data import (
+     dataset_generator,
+ )
+ from poly_bench_evaluation.repo_utils import RepoManager
+-from poly_bench_evaluation.scoring import (
+-    aggregate_logs,
+-    instance_level_scoring,
+-    store_instance_level_output,
+-)
+ from datasets import load_dataset
++import re
++
++
++def get_contributing_functions(test_patch):
++    """
++    Extracts the test functions that have been added or modified from the given test patch.
++
++    Args:
++        test_patch (str): The test patch to analyze.
++
++    Returns:
++        dict: A dictionary mapping file names to lists of modified test functions.
++    """
++
++    list_functions={}
++    test_patch_segments=test_patch.split("+++ b")           
++    
++    for j in range(1,len(test_patch_segments)):
++    
++        focus_text=test_patch_segments[j]
++
++        filename=test_patch_segments[j].split("\n")[0].strip()
++
++        if filename.strip().endswith(".java")==False:
++            continue
++
++        if filename.startswith("/"):
++            filename=filename[1:]
++
++
++        list_functions[filename]=[]
++
++        method_pattern = re.compile(r'^(?:\+|-)?\s*(?:public|private|protected)?\s*' 
++                            r'(?:static\s+)?'
++                            r'[\w<>\[\]]+\s+' 
++                            r'(\w+)\s*' 
++                            r'\([^;]*\)\s*\{?' 
++        )
++
++
++        focus_text=focus_text.replace("@@", "@@\n")
++        segments=focus_text.split("\n")
++
++        for i in range(len(segments)):
++
++            if segments[i].find("@@")!=-1:
++                continue
++            if segments[i].strip().startswith("-"):
++                continue
++
++            if (method_pattern.match(segments[i])):   
++                funcname=method_pattern.match(segments[i]).group(1)
++
++                if filename in list_functions:
++                    if funcname.startswith("test"):
++                        list_functions[filename].append(funcname)
++                else:                    
++                    list_functions[filename]=[]
++                    if funcname.startswith("test"):
++                        list_functions[filename].append(funcname)
++
++    return list_functions 
++
++
++
+ 
+ def evaluate_instance(
+     instance: PolyBenchInstance,
+@@ -59,70 +118,131 @@ def evaluate_instance(
+         ValueError: if the docker build fails
+     """
+     instance_id = instance.instance_id
+-    model_patch = instance.model_patch if instance.model_patch else ""
+-    test_patch = instance.test_patch
++
++    print("Processing: ...."+instance_id+"\n")
++
++    test_patch = instance.model_patch if instance.model_patch else ""
++    model_patch = instance.patch
++
++    if evaluate_gold==True:
++        test_patch=instance.test_patch
++
+     repo = instance.repo
+     base_commit = instance.base_commit
+     language = instance.language
+     parser_class_name = REPO_TO_PARSER_CLASS.get(repo, None)
++    parser_class_name1 = REPO_TO_PARSER_CLASS.get(repo, None)
+ 
+     if not parser_class_name:
+         raise ValueError(f"Parser class not found for repo: {repo}. Please check the repo name.")
+ 
++    if not parser_class_name1:
++        raise ValueError(f"Parser class not found for repo: {repo}. Please check the repo name.")
++
++
++
+     f2p = instance.f2p
+     p2p = instance.p2p
+     test_command = instance.test_command
+ 
+-    if evaluate_gold:
+-        model_patch = instance.patch
++
++    spec_string=""
++
++    if test_command.find("mvn")!=-1 or test_command.find("./mvnw")!=-1:
++        if instance.classname!="" and instance.testname!="":
++            spec_string=instance.classname+"#"+instance.testname
++
++
++        if  instance.classname!="" and instance.testname=="":  
++            spec_string=instance.classname
++
++        if instance.classname=="" or evaluate_gold==True:
++            contrib_tests=get_contributing_functions(test_patch)
++
++            spec_string=""
++            for file in contrib_tests:
++                file_name=file.split("/")[-1].replace(".java","")
++
++                if instance_id.startswith("google__guava")==False and len(contrib_tests[file])==1:
++                    for func in contrib_tests[file]:
++                        spec_string= spec_string+file_name+"#"+func+","
++                else:
++                    spec_string= spec_string+file_name+","
++
++
++            spec_string=spec_string[0:len(spec_string)-1]
++
++
++    if test_command.find("./gradlew")!=-1:
++        if instance.classname!="" and instance.testname!="":
++            spec_string="\"*"+instance.classname+"."+instance.testname+"\""
++
++
++        if  instance.classname!="" and instance.testname=="":  
++            spec_string="\"*"+instance.classname+"\""
++
++        if instance.classname=="" or evaluate_gold==True:
++            contrib_tests=get_contributing_functions(test_patch)
++
++
++            spec_string=""
++            for file in contrib_tests:
++                file_name=file.split("/")[-1].replace(".java","")
++
++                if len(contrib_tests[file])==1:
++                    for func in contrib_tests[file]:
++                        spec_string= spec_string+"--tests "+"\"*"+file_name+"."+func+"\""+" "
++                else:
++                    spec_string= spec_string+"--tests "+"\"*"+file_name+"\""+" "
++
++
++            spec_string=spec_string[0:len(spec_string)-1]
++
++
++
++    if test_command.find("mvn")!=-1 or test_command.find("./mvnw")!=-1:
++        test_command_tokens=test_command.split()
++        test_command=""
++
++        for tok in test_command_tokens:
++            if tok.startswith("-Dtest"):
++                test_command=test_command+"-Dtest="+spec_string+" "
++            else:
++                test_command=test_command+tok+" "
++        
++        test_command=test_command.strip()
++
++
++    if test_command.find("./gradlew")!=-1:
++
++        test_command_tokens=test_command.split()
++        test_command=""
++
++        for tok in test_command_tokens:
++            if tok.startswith("--tests"):
++                test_command=test_command+""+spec_string+" "
++            else:
++                test_command=test_command+tok+" "
++        
++        test_command=test_command.strip()
++
+ 
+     instance_output: Union[PolyBenchOutput, PolyBenchRetrievalMetrics]
+-    if retrieval_metrics_only:
+-        logger.info(f"Computing only retrieval metrics for {instance_id}")
+-        instance_output = instance_level_metric_scoring(
+-            instance=instance,
+-            repo_path=repo_path,
+-            node_retrieval_metrics=node_retrieval_metrics,
+-            modified_nodes=instance.modified_nodes,
+-        )
+-        store_instance_level_output(
+-            instance_output=instance_output, result_path=result_path, suffix="_metrics"
+-        )
+-        return
+ 
+     if not model_patch.strip():  # if model patch is empty
+         # Store pass rate results
+         logger.info(f"model patch empty for {instance_id}")
+-        instance_output = instance_level_scoring(
+-            instance_id=instance_id,
+-            result={},
+-            f2p=f2p,
+-            p2p=p2p,
+-            patch_applied=False,
+-            generation=False,
+-        )
+-        store_instance_level_output(instance_output=instance_output, result_path=result_path)
+-
+-        # Store retrieval metrics
+-        zero_metrics = _get_zero_result(
+-            instance_id=instance_id, node_retrieval_metrics=node_retrieval_metrics
+-        )
+-        store_instance_level_output(
+-            instance_output=zero_metrics, result_path=result_path, suffix="_metrics"
+-        )
+-
+         return
+ 
+     image_id = f"polybench_{language.lower()}_{instance_id.lower()}"
+ 
+-    # Check if image is available locally, in GHCR, or needs to be built
++    # build docker if image id is not available in local or public.ecr
+     docker_manager = DockerManager(image_id=image_id, delete_image=delete_image, client=client)
+ 
+     repo_manager = None
+-    
+     if docker_manager.check_image_local(local_image_name=image_id):
+         logger.info(f"Using existing local image: {image_id}")
+-    elif docker_manager.try_pull_prebuilt_image(instance_id):
++    elif docker_manager.try_pull_prebuilt_image(instance_id, instance.image_name):
+         logger.info(f"Successfully pulled pre-built image from GHCR: {image_id}")
+     else:
+         # Fall back to building locally
+@@ -137,6 +257,10 @@ def evaluate_instance(
+         build_logs_path = Path("./build_logs")
+         build_logs_path.mkdir(exist_ok=True)
+         retry = 3
++
++        # Initialize build_success to ensure it's always defined
++        build_success = -1
++        
+         for attempt in range(retry):
+             logger.info(f"Docker building - Attempt {attempt + 1}/{retry}")
+             build_success = docker_manager.docker_build(
+@@ -160,36 +284,72 @@ def evaluate_instance(
+ 
+         # If we get here, all retries failed
+         if build_success != 0:
+-            raise ValueError(
+-                f"Docker build failed for {instance_id} after {retry} attempts. Please check the dockerfile content and build logs."
+-            )
++            #raise ValueError(
++                #f"Docker build failed for {instance_id} after {retry} attempts. Please check the dockerfile content and build logs."
++            #)
++            print("Docker build failed for {instance_id} after {retry} attempts. Please check the dockerfile content and build logs.")
++            return
++
++
+ 
+     # Create a docker container and run the image
+     docker_manager.create_container()
+ 
++
++################################################################################################################################################################
++
+     # Apply the test patch
+     try:
+         _ = docker_manager.apply_patch_to_container(patch_content=test_patch, patch_type="test")
+     except Exception:
+         logger.debug(f"test patch apply error for instance id: {instance_id}, please check.")
+-        instance_output = instance_level_scoring(
+-            instance_id=instance_id,
+-            result={},
+-            f2p=f2p,
+-            p2p=p2p,
+-            patch_applied=False,
+-            generation=False,
+-        )
+-        store_instance_level_output(instance_output=instance_output, result_path=result_path)
++        docker_manager.__del__()
++        return
+ 
+-        # Store retrieval metrics
+-        instance_metric_output = instance_level_metric_scoring(
+-            instance=instance, repo_path=repo_path, node_retrieval_metrics=node_retrieval_metrics, modified_nodes=instance.modified_nodes
+-        )
+-        store_instance_level_output(
+-            instance_output=instance_metric_output, result_path=result_path, suffix="_metrics"
++    logger.info(f"docker running for {instance_id}")
++    run_timeout = JAVA_TIMEOUT if language.lower() == "java" else DEFAULT_TIMEOUT
++
++
++    _ = docker_manager.docker_run(test_command=test_command, timeout=run_timeout)
++
++    # log the run logs
++    run_logs_string = "\n".join(docker_manager.run_logs)
++    run_logs_path = Path(f"./run_logs_{language.lower()}")
++    run_logs_path.mkdir(exist_ok=True)
++
++    with open(str(run_logs_path) + f"/{instance_id}_run.log", "w") as f:
++        f.write(run_logs_string)
++
++
++
++    # parse the log of docker run
++    all_parsers = importlib.import_module("poly_bench_evaluation.parsers")
++    if hasattr(all_parsers, parser_class_name):
++        parser_class = getattr(all_parsers, parser_class_name)
++        log_parser = parser_class(test_content=run_logs_string)
++        result = log_parser.parse()
++    else:
++        raise ValueError(
++            f"Parser class {parser_class_name} not found in the parsers module. Please ensure proper paraser class name."
+         )
+ 
++    docker_manager.run_logs=[]
++
++    try:
++        _ = docker_manager.apply_withdraw_from_container(patch_content=test_patch, patch_type="test")
++    except Exception:
++        logger.debug(f"test patch apply error for instance id: {instance_id}, please check.")
++        docker_manager.__del__()
++        return
++
++
++################################################################################################################################################################
++
++    # Apply the test patch
++    try:
++        _ = docker_manager.apply_patch_to_container(patch_content=test_patch, patch_type="test")
++    except Exception:
++        logger.debug(f"test patch apply error for instance id: {instance_id}, please check.")
+         docker_manager.__del__()
+         return
+ 
+@@ -204,24 +364,6 @@ def evaluate_instance(
+ 
+     if patch_success != 0:
+         logger.info(f"patch apply error for instance id: {instance_id}")
+-        instance_output = instance_level_scoring(
+-            instance_id=instance_id,
+-            result={},
+-            f2p=f2p,
+-            p2p=p2p,
+-            patch_applied=False,
+-            generation=True,
+-        )
+-        store_instance_level_output(instance_output=instance_output, result_path=result_path)
+-
+-        # Store retrieval metrics
+-        zero_metrics = _get_zero_result(
+-            instance_id=instance_id, node_retrieval_metrics=node_retrieval_metrics
+-        )
+-        store_instance_level_output(
+-            instance_output=zero_metrics, result_path=result_path, suffix="_metrics"
+-        )
+-
+         docker_manager.__del__()
+         return
+ 
+@@ -231,46 +373,53 @@ def evaluate_instance(
+     _ = docker_manager.docker_run(test_command=test_command, timeout=run_timeout)
+ 
+     # log the run logs
+-    run_logs_string = "\n".join(docker_manager.run_logs)
+-    run_logs_path = Path(f"./run_logs_{language.lower()}")
+-    run_logs_path.mkdir(exist_ok=True)
++    run_logs_string1 = "\n".join(docker_manager.run_logs)
+ 
+-    with open(str(run_logs_path) + f"/{instance_id}_run.log", "w") as f:
+-        f.write(run_logs_string)
++    with open(str(run_logs_path) + f"/{instance_id}_run1.log", "w") as f:
++        f.write(run_logs_string1)
+ 
+     # parse the log of docker run
+-    all_parsers = importlib.import_module("poly_bench_evaluation.parsers")
+-    if hasattr(all_parsers, parser_class_name):
+-        parser_class = getattr(all_parsers, parser_class_name)
+-        log_parser = parser_class(test_content=run_logs_string)
+-        result = log_parser.parse()
++    all_parsers1 = importlib.import_module("poly_bench_evaluation.parsers")
++    if hasattr(all_parsers1, parser_class_name1):      
++        parser_class1 = getattr(all_parsers1, parser_class_name1)
++        log_parser1 = parser_class1(test_content=run_logs_string1)
++        result1 = log_parser1.parse()
+     else:
+         raise ValueError(
+             f"Parser class {parser_class_name} not found in the parsers module. Please ensure proper paraser class name."
+-        )
++        )    
++
++    resolved=False
++    for w in result['failed_tests']:
++        if w in result1['passed_tests']:
++            resolved=True
++        else:
++            resolved=False
++            break
++
++    if len(result1['passed_tests'])>0 and len(result['passed_tests'])==0 and len(result['failed_tests'])==0:
++        resolved=True        
++
++
++    temp={}
++    temp["old_dict"]=result
++    temp["new_dict"]=result1
++    temp["resolved"]=resolved 
++
++    if os.path.exists(result_path)==False:
++         os.mkdir(result_path)
++
++    with open(result_path+instance_id+"_result.json", "w") as file:
++        json.dump([temp], file, indent=4)        
++
+ 
+-    instance_output = instance_level_scoring(
+-        instance_id=instance_id,
+-        result=result,
+-        f2p=f2p,
+-        p2p=p2p,
+-        patch_applied=True,
+-        generation=True,
+-    )
+-    store_instance_level_output(instance_output=instance_output, result_path=result_path)
+-
+-    # Store retrieval metrics
+-    instance_metric_output = instance_level_metric_scoring(
+-        instance=instance, repo_path=repo_path, node_retrieval_metrics=node_retrieval_metrics, modified_nodes=instance.modified_nodes
+-    )
+-    store_instance_level_output(
+-        instance_output=instance_metric_output, result_path=result_path, suffix="_metrics"
+-    )
+ 
+     docker_manager.__del__()
+     if repo_manager is not None:
+         repo_manager.__del__()
+ 
++    return    
++
+ 
+ def evaluate_predictions(
+     dataset_path: str,
+@@ -283,6 +432,7 @@ def evaluate_predictions(
+     skip_existing: bool,
+     retrieval_metrics_only: bool = False,
+     node_retrieval_metrics: bool = False,
++    instance_id_to_run: str =""
+ ):
+     """Predictions file evaluation function.
+     Args:
+@@ -311,6 +461,10 @@ def evaluate_predictions(
+ 
+     suffix = "_result" if not retrieval_metrics_only else "_metrics"
+ 
++    if instance_id_to_run!="":
++        dataset = dataset[dataset["instance_id"]==instance_id_to_run]
++
++
+     if skip_existing:
+         dataset = dataset[
+             ~dataset["instance_id"].isin(
+@@ -332,7 +486,7 @@ def evaluate_predictions(
+ 
+     if predictions_path:
+         try:
+-            predictions = pd.read_json(predictions_path, lines=True)
++            predictions = pd.read_json(predictions_path, lines=False)
+ 
+             assert (
+                 "model_patch" in predictions.columns
+@@ -341,9 +495,21 @@ def evaluate_predictions(
+                 "instance_id" in predictions.columns
+             ), "instance_id column not found in predictions file."
+ 
++            if "class_name" not in predictions.columns:
++                predictions["class_name"]=""
++
++            if "function_name" not in predictions.columns:
++                predictions["function_name"]=""
++
++            if "file_name" not in predictions.columns:
++                predictions["file_name"]=""
++
++            if "Dockerfile" not in predictions.columns:
++                predictions["Dockerfile"]=""
++
+             dataset = pd.merge(
+                 dataset,
+-                predictions[["instance_id", "model_patch"]],
++                predictions[["instance_id", "model_patch","class_name","function_name","file_name"]],
+                 how="left",
+                 on="instance_id",
+             )
+@@ -352,6 +518,43 @@ def evaluate_predictions(
+         except Exception:
+             raise ValueError("Please provide a correct predictions jsonl file.")
+ 
++    else:
++        try:
++            predictions = pd.read_csv(dataset_path)
++            assert (
++                "instance_id" in predictions.columns
++            ), "instance_id column not found in predictions file."
++
++            if "model_patch" not in predictions.columns:
++                predictions["model_patch"]=""
++
++            if "class_name" not in predictions.columns:
++                predictions["class_name"]=""
++
++            if "function_name" not in predictions.columns:
++                predictions["function_name"]=""
++
++            if "file_name" not in predictions.columns:
++                predictions["file_name"]=""
++
++            if "Dockerfile" not in predictions.columns:
++                predictions["Dockerfile"]=""
++   
++                
++            dataset = pd.merge(
++                dataset,
++                predictions[["instance_id", "model_patch","class_name","function_name","file_name"]],
++                how="left",
++                on="instance_id",
++            )
++            # Fill any missing model_patch values with empty string
++            dataset.fillna({"model_patch": ""}, inplace=True)
++        except Exception:
++            raise ValueError("Please provide a correct predictions jsonl file.")
++
++
++
++
+     with ThreadPool(num_threads) as pool:
+ 
+         def process_wrapper(instance: PolyBenchInstance):
+@@ -371,46 +574,227 @@ def evaluate_predictions(
+         results = pool.imap_unordered(process_wrapper, data_gen)
+         results_list = list(results)  # noqa: F841
+ 
+-    # aggregate the logs of all instance_ids into one json
+-    aggregate_logs(
+-        result_path=result_path, dataset_path=dataset_path, metrics_only=retrieval_metrics_only
+-    )
+ 
++def score_eval_results(eval_logs_path: str = "./eval_logs", output_path: str = "./scoring_results.json", dataset_path: Union[str, None] = None):
++    """
++    Read JSON files from eval logs and categorize instance IDs into three groups:
++    - Fail-to-pass: Tests that were failing before and passing after (resolved=True)
++    - Not Fail-to-pass: Tests that were not resolved (resolved=False or no improvement)
++    - Not found: Instance IDs that don't have result files
++    
++    Args:
++        eval_logs_path: Path to the directory containing eval log JSON files
++        output_path: Path to save the scoring results
++        dataset_path: Optional path to dataset file to get total sample count and identify missing instances
++        
++    Returns:
++        dict: Dictionary containing the three categories with instance IDs
++    """
++    from pathlib import Path
++    import json
++    
++    eval_logs_dir = Path(eval_logs_path)
++    
++    if not eval_logs_dir.exists():
++        raise ValueError(f"Eval logs directory not found: {eval_logs_path}")
++    
++    # Load dataset if provided to get total count and identify missing instances
++    all_instance_ids = set()
++    total_samples = 0
++    
++    if dataset_path:
++        try:
++            if dataset_path.endswith('.jsonl'):
++                # Read JSONL file
++                with open(dataset_path, 'r') as f:
++                    for line in f:
++                        data = json.loads(line.strip())
++                        if 'instance_id' in data:
++                            all_instance_ids.add(data['instance_id'])
++                total_samples = len(all_instance_ids)
++                logger.info(f"Loaded {total_samples} instance IDs from dataset: {dataset_path}")
++            elif dataset_path.endswith('.csv'):
++                # Read CSV file
++                dataset_df = pd.read_csv(dataset_path)
++                if 'instance_id' in dataset_df.columns:
++                    all_instance_ids = set(dataset_df['instance_id'].tolist())
++                    total_samples = len(all_instance_ids)
++                    logger.info(f"Loaded {total_samples} instance IDs from dataset: {dataset_path}")
++                else:
++                    logger.warning("'instance_id' column not found in CSV dataset")
++            else:
++                logger.warning(f"Unsupported dataset format: {dataset_path}. Expected .jsonl or .csv")
++        except Exception as e:
++            logger.error(f"Error loading dataset: {e}")
++    
++    # Initialize result categories
++    fail_to_pass = []
++    not_fail_to_pass = []
++    empty_file = []
++    
++    # Get all JSON result files
++    result_files = list(eval_logs_dir.glob("*_result.json"))
++    processed_instance_ids = set()
++    
++    logger.info(f"Found {len(result_files)} result files in {eval_logs_path}")
++    
++    for result_file in result_files:
++        # Extract instance_id from filename (e.g., google__gson-2337_result.json -> google__gson-2337)
++        instance_id = result_file.stem.replace("_result", "")
++        processed_instance_ids.add(instance_id)
++        
++        try:
++            with open(result_file, 'r') as f:
++                data = json.load(f)
++            
++            # Check if data is a list and has at least one element
++            if isinstance(data, list) and len(data) > 0:
++                result = data[0]
++                
++                # Check if resolved field exists and is True
++                if result.get("resolved", False):
++                    fail_to_pass.append(instance_id)
++                else:
++                    # Not resolved
++                    not_fail_to_pass.append(instance_id)
++            else:
++                # Empty or invalid data structure
++                logger.warning(f"Invalid data structure in {result_file}")
++                not_fail_to_pass.append(instance_id)
++                
++        except json.JSONDecodeError as e:
++            logger.error(f"Failed to parse JSON in {result_file}: {e}")
++            empty_file.append(instance_id)
++        except Exception as e:
++            logger.error(f"Error processing {result_file}: {e}")
++            empty_file.append(instance_id)
++    
++    # Identify missing instances if dataset was provided
++    missing_instances = []
++    if all_instance_ids:
++        missing_instances = sorted(list(all_instance_ids - processed_instance_ids))
++        logger.info(f"Missing instances (not in eval logs): {len(missing_instances)}")
++    
++    # Create summary
++    results = {
++        "fail_to_pass": {
++            "count": len(fail_to_pass),
++            "instance_ids": sorted(fail_to_pass)
++        },
++        "not_fail_to_pass": {
++            "count": len(not_fail_to_pass),
++            "instance_ids": sorted(not_fail_to_pass)
++        },
++        "empty_file": {
++            "count": len(empty_file),
++            "instance_ids": sorted(empty_file)
++        },
++        "missing": {
++            "count": len(missing_instances),
++            "instance_ids": missing_instances
++        },
++        "total_in_dataset": total_samples if total_samples > 0 else None,
++        "total_processed": len(result_files),
++        "summary": {
++            "fail_to_pass_rate": f"{len(fail_to_pass) / len(result_files) * 100:.2f}%" if result_files else "0.00%",
++            "not_fail_to_pass_rate": f"{len(not_fail_to_pass) / len(result_files) * 100:.2f}%" if result_files else "0.00%",
++            "empty_file_rate": f"{len(empty_file) / len(result_files) * 100:.2f}%" if result_files else "0.00%",
++            "missing_rate": f"{len(missing_instances) / total_samples * 100:.2f}%" if total_samples > 0 else "N/A",
++            "coverage_rate": f"{len(result_files) / total_samples * 100:.2f}%" if total_samples > 0 else "N/A"
++        }
++    }
++    
++    # Save results to file
++    output_file = Path(output_path)
++    with open(output_file, 'w') as f:
++        json.dump(results, f, indent=2)
++    
++    # Print summary
++    logger.info("=" * 60)
++    logger.info("SCORING RESULTS SUMMARY")
++    logger.info("=" * 60)
++    if total_samples > 0:
++        logger.info(f"Total samples in dataset: {total_samples}")
++        logger.info(f"Coverage: {results['summary']['coverage_rate']}")
++        logger.info("-" * 60)
++    logger.info(f"Total files processed: {results['total_processed']}")
++    logger.info(f"Fail-to-pass: {results['fail_to_pass']['count']} ({results['summary']['fail_to_pass_rate']})")
++    logger.info(f"Not Fail-to-pass: {results['not_fail_to_pass']['count']} ({results['summary']['not_fail_to_pass_rate']})")
++    logger.info(f"Empty file/Error: {results['empty_file']['count']} ({results['summary']['empty_file_rate']})")
++    if total_samples > 0:
++        logger.info(f"Missing from eval logs: {results['missing']['count']} ({results['summary']['missing_rate']})")
++    logger.info("=" * 60)
++    logger.info(f"Results saved to: {output_file}")
++    
++    return results
+ 
+ if __name__ == "__main__":
+     parser = argparse.ArgumentParser()
+-    parser.add_argument("--dataset-path", type=str, required=True)
++    
++    # Mode selection flag
++    parser.add_argument("--score-only", action="store_true", default=False,
++                       help="Run scoring mode instead of evaluation mode")
++    
++    # Evaluation mode arguments (original functionality)
++    parser.add_argument("--dataset-path", type=str, required=False)
+     parser.add_argument("--predictions-path", type=str, required=False)
+-    parser.add_argument("--result-path", type=str, required=True)
++    parser.add_argument("--result-path", type=str, required=False)
+     parser.add_argument("--num-threads", type=int, default=1, required=False)
+     parser.add_argument("--evaluate-gold", action="store_true", default=False)
+     parser.add_argument("--repo-path", type=str, default="~/polybench_repos", required=False)
+     parser.add_argument("--delete-image", action="store_true", default=False)
+     parser.add_argument("--skip-existing", action="store_true", default=False)
+-    parser.add_argument(
+-        "--metrics-only",
+-        action="store_true",
+-        default=False,
+-        help="If set, no pass rates will be computed.",
+-    )
+-    parser.add_argument(
+-        "--node-metrics",
+-        action="store_true",
+-        default=False,
+-        help="If set, node retrieval metrics will be computed.",
+-    )
++    parser.add_argument("--instance_id_to_run", type=str, default="")
++    
++    # Scoring mode arguments
++    parser.add_argument("--eval-logs-path", type=str, default="./eval_logs",
++                       help="Path to eval logs directory (default: ./eval_logs)")
++    parser.add_argument("--output-path", type=str, default="./scoring_results.json",
++                       help="Path to save scoring results (default: ./scoring_results.json)")
+ 
+     args = parser.parse_args()
+-
+-    evaluate_predictions(
+-        dataset_path=args.dataset_path,
+-        predictions_path=args.predictions_path,
+-        result_path=args.result_path,
+-        num_threads=args.num_threads,
+-        evaluate_gold=args.evaluate_gold,
+-        repo_path=args.repo_path,
+-        delete_image=args.delete_image,
+-        skip_existing=args.skip_existing,
+-        retrieval_metrics_only=args.metrics_only,
+-        node_retrieval_metrics=args.node_metrics,
+-    )
++    
++    # Handle modes
++    if args.score_only:
++        # Scoring mode
++        score_eval_results(
++            eval_logs_path=args.eval_logs_path,
++            output_path=args.output_path,
++            dataset_path=args.dataset_path
++        )
++    else:
++        # Evaluation mode (original functionality)
++        if not args.dataset_path or not args.result_path:
++            parser.error("--dataset-path and --result-path are required for evaluation mode")
++        
++        evaluate_predictions(
++            dataset_path=args.dataset_path,
++            predictions_path=args.predictions_path,
++            result_path=args.result_path,
++            num_threads=args.num_threads,
++            evaluate_gold=args.evaluate_gold,
++            repo_path=args.repo_path,
++            delete_image=args.delete_image,
++            skip_existing=args.skip_existing,
++            instance_id_to_run=args.instance_id_to_run
++        )
++        
++        # Automatically run scoring after evaluation completes
++        logger.info("\n" + "=" * 60)
++        logger.info("Evaluation complete. Running automatic scoring...")
++        logger.info("=" * 60)
++        
++        # Determine scoring output path based on result_path
++        scoring_output = Path(args.result_path) / "scoring_results.json"
++        
++        try:
++            score_eval_results(
++                eval_logs_path=args.result_path,
++                output_path=str(scoring_output),
++                dataset_path=args.dataset_path
++            )
++        except Exception as e:
++            logger.error(f"Error during automatic scoring: {e}")
++            logger.info("You can run scoring manually with: --score-only --eval-logs-path {} --dataset-path {}".format(
++                args.result_path, args.dataset_path
++            ))
