@@ -17,7 +17,7 @@ setuptools.setup(
         'unidiff',
         'tqdm',
         'pytest',
-        'cldk'
+        'cldk==1.0.6'
     ],
     include_package_data=True,
 )
